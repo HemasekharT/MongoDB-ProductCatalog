@@ -11,6 +11,11 @@ on:
       - 'cloudbuild.yaml'
       - '.github/workflows/deploy-backend.yml'
   workflow_dispatch:  # Allow manual trigger
+  workflow_call:  # Allow being called by other workflows
+    outputs:
+      backend-url:
+        description: "URL of the deployed backend service"
+        value: ${{ jobs.deploy.outputs.backend-url }}
 
 env:
   PROJECT_ID: elegant-verbena-480615-a4

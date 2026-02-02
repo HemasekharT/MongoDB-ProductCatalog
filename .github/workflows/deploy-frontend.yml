@@ -11,6 +11,11 @@ on:
       - 'cloudbuild-frontend.yaml'
       - '.github/workflows/deploy-frontend.yml'
   workflow_dispatch:  # Allow manual trigger
+  workflow_call:  # Allow being called by other workflows
+    outputs:
+      frontend-url:
+        description: "URL of the deployed frontend service"
+        value: ${{ jobs.deploy.outputs.frontend-url }}
 
 env:
   PROJECT_ID: elegant-verbena-480615-a4

@@ -1,9 +1,10 @@
 """Database configuration and connection management."""
-import os
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import MongoClient
 from typing import Optional
 import logging
+
+from backend.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +20,11 @@ class DatabaseManager:
         
     async def connect(self):
         """Establish async connection to MongoDB Atlas."""
-        mongodb_uri = os.getenv("MONGODB_URI")
-        db_name = os.getenv("MONGODB_DB_NAME", "product_catalog")
+        mongodb_uri = settings.MONGODB_URI
+        db_name = settings.MONGODB_DB_NAME
         
         if not mongodb_uri:
-            raise ValueError("MONGODB_URI environment variable not set")
+            raise ValueError("MONGODB_URI not configured")
         
         try:
             self.client = AsyncIOMotorClient(mongodb_uri)
@@ -39,11 +40,11 @@ class DatabaseManager:
     
     def connect_sync(self):
         """Establish synchronous connection for scripts."""
-        mongodb_uri = os.getenv("MONGODB_URI")
-        db_name = os.getenv("MONGODB_DB_NAME", "product_catalog")
+        mongodb_uri = settings.MONGODB_URI
+        db_name = settings.MONGODB_DB_NAME
         
         if not mongodb_uri:
-            raise ValueError("MONGODB_URI environment variable not set")
+            raise ValueError("MONGODB_URI not configured")
         
         try:
             self.sync_client = MongoClient(mongodb_uri)

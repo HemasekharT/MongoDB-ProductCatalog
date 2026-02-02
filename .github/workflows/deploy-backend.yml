@@ -1,0 +1,86 @@
+name: Deploy Backend to Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - 'Dockerfile'
+      - 'requirements.txt'
+      - 'cloudbuild.yaml'
+      - '.github/workflows/deploy-backend.yml'
+  workflow_dispatch:  # Allow manual trigger
+
+env:
+  PROJECT_ID: elegant-verbena-480615-a4
+  REGION: us-central1
+  SERVICE_NAME: product-catalog-backend
+
+jobs:
+  deploy:
+    name: Deploy Backend
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      id-token: write  # Required for Workload Identity Federation
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+      
+      - name: Configure Docker for GCR
+        run: |
+          gcloud auth configure-docker
+      
+      - name: Build and Push Docker Image
+        run: |
+          docker build -t gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ github.sha }} \
+                       -t gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:latest \
+                       -f Dockerfile .
+          docker push gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
+          docker push gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:latest
+      
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ github.sha }} \
+            --platform managed \
+            --region ${{ env.REGION }} \
+            --allow-unauthenticated \
+            --set-env-vars ENVIRONMENT=production,GOOGLE_CLOUD_PROJECT=${{ env.PROJECT_ID }},VERTEX_AI_LOCATION=${{ env.REGION }},MONGODB_DB_NAME=productcatalog \
+            --set-secrets MONGODB_URI=mongodb-uri:latest \
+            --memory 512Mi \
+            --cpu 1 \
+            --timeout 300 \
+            --max-instances 10 \
+            --min-instances 0
+      
+      - name: Get Service URL
+        id: get-url
+        run: |
+          SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
+            --region ${{ env.REGION }} \
+            --format 'value(status.url)')
+          echo "url=$SERVICE_URL" >> $GITHUB_OUTPUT
+          echo "Backend deployed to: $SERVICE_URL"
+      
+      - name: Test Health Endpoint
+        run: |
+          sleep 10  # Wait for service to be ready
+          curl -f ${{ steps.get-url.outputs.url }}/ || exit 1
+          echo "✅ Backend health check passed"
+    
+    outputs:
+      backend-url: ${{ steps.get-url.outputs.url }}

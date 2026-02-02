@@ -1,0 +1,111 @@
+name: Deploy Frontend to Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'frontend/**'
+      - 'Dockerfile.frontend'
+      - 'nginx.conf'
+      - 'cloudbuild-frontend.yaml'
+      - '.github/workflows/deploy-frontend.yml'
+  workflow_dispatch:  # Allow manual trigger
+
+env:
+  PROJECT_ID: elegant-verbena-480615-a4
+  REGION: us-central1
+  SERVICE_NAME: product-catalog-frontend
+  BACKEND_SERVICE: product-catalog-backend
+
+jobs:
+  deploy:
+    name: Deploy Frontend
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      id-token: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+      
+      - name: Get Backend URL
+        id: backend-url
+        run: |
+          BACKEND_URL=$(gcloud run services describe ${{ env.BACKEND_SERVICE }} \
+            --region ${{ env.REGION }} \
+            --format 'value(status.url)' 2>/dev/null || echo "")
+          
+          if [ -z "$BACKEND_URL" ]; then
+            echo "⚠️  Backend service not found, using placeholder"
+            BACKEND_URL="https://${{ env.BACKEND_SERVICE }}-PLACEHOLDER.run.app"
+          fi
+          
+          echo "backend_url=$BACKEND_URL" >> $GITHUB_OUTPUT
+          echo "Backend URL: $BACKEND_URL"
+      
+      - name: Update Frontend Config
+        run: |
+          # Update app.js with backend URL
+          sed -i "s|const API_BASE_URL = .*|const API_BASE_URL = '${{ steps.backend-url.outputs.backend_url }}';|" frontend/app.js
+          echo "✅ Updated frontend config with backend URL"
+      
+      - name: Configure Docker for GCR
+        run: |
+          gcloud auth configure-docker
+      
+      - name: Build and Push Docker Image
+        run: |
+          docker build -t gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ github.sha }} \
+                       -t gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:latest \
+                       -f Dockerfile.frontend .
+          docker push gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
+          docker push gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:latest
+      
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ github.sha }} \
+            --platform managed \
+            --region ${{ env.REGION }} \
+            --allow-unauthenticated \
+            --memory 256Mi \
+            --cpu 1 \
+            --timeout 60 \
+            --max-instances 10 \
+            --min-instances 0
+      
+      - name: Get Service URL
+        id: get-url
+        run: |
+          SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
+            --region ${{ env.REGION }} \
+            --format 'value(status.url)')
+          echo "url=$SERVICE_URL" >> $GITHUB_OUTPUT
+          echo "Frontend deployed to: $SERVICE_URL"
+      
+      - name: Test Frontend
+        run: |
+          sleep 10  # Wait for service to be ready
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" ${{ steps.get-url.outputs.url }})
+          if [ "$HTTP_CODE" -eq 200 ]; then
+            echo "✅ Frontend is accessible"
+          else
+            echo "❌ Frontend returned HTTP $HTTP_CODE"
+            exit 1
+          fi
+    
+    outputs:
+      frontend-url: ${{ steps.get-url.outputs.url }}

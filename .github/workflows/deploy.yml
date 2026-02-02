@@ -10,17 +10,27 @@ env:
   PROJECT_ID: elegant-verbena-480615-a4
   REGION: us-central1
 
+permissions:
+  contents: read
+  id-token: write  # Required for called workflows
+
 jobs:
   deploy-backend:
     name: Deploy Backend
     uses: ./.github/workflows/deploy-backend.yml
     secrets: inherit
+    permissions:
+      contents: read
+      id-token: write
   
   deploy-frontend:
     name: Deploy Frontend
     needs: deploy-backend
     uses: ./.github/workflows/deploy-frontend.yml
     secrets: inherit
+    permissions:
+      contents: read
+      id-token: write
   
   summary:
     name: Deployment Summary
